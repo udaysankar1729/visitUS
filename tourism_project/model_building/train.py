@@ -88,7 +88,35 @@ def train_model(
         print(f"F1-Score: {f1:.4f}")
         print("Classification Report:\n", classification_report(y_test, y_pred))
 
-        # MLflow Tracking
+    except Exception as e:
+        print(f"An error occurred during model training/evaluation: {e}")
+        raise
+
+    # --- Save the best model immediately after training/evaluation. ---
+    # This step is deliberately OUTSIDE the try/except above (and BEFORE the
+    # optional MLflow logging below) so that the model file always gets
+    # written even if MLflow logging fails for any reason. This is what the
+    # GitHub Actions workflow commits into tourism_project/deployment/, and
+    # what the Streamlit app loads at runtime.
+    os.makedirs(model_output_dir, exist_ok=True)
+    model_path = os.path.join(model_output_dir, "best_model.joblib")
+    joblib.dump(best_model, model_path)
+    print(f"Best model saved to {model_path}")
+
+    # --- MLflow experiment tracking (best-effort, non-fatal). ---
+    # Wrapped in its own try/except so any MLflow issue (registry, tracking
+    # store, logging flavor, etc.) can never prevent the model artifact
+    # itself from being produced - that used to be the actual bug here:
+    # `best_model` is a scikit-learn Pipeline (preprocessor + XGBClassifier),
+    # not a native XGBoost Booster/XGBClassifier, so mlflow.xgboost.log_model
+    # tried to call best_model.save_model() and raised
+    # "'Pipeline' object has no attribute 'save_model'". That exception used
+    # to happen inside the same try block as joblib.dump(), so the model
+    # file was never saved and Streamlit reported "best_model.joblib not
+    # found". Logging with mlflow.sklearn instead of mlflow.xgboost matches
+    # the actual object type, so this now succeeds instead of just being
+    # silently skipped.
+    try:
         mlflow.set_experiment("Tourism Package Prediction")
         with mlflow.start_run():
             mlflow.log_params(grid_search.best_params_)
@@ -98,17 +126,16 @@ def train_model(
                 "recall": recall,
                 "f1_score": f1
             })
-            mlflow.xgboost.log_model(best_model, "xgboost_model", registered_model_name="TourismPredictor")
+            # best_model is a sklearn Pipeline, so use the sklearn flavor
+            # (not mlflow.xgboost, which expects a native XGBoost object).
+            # No registered_model_name - registering requires a
+            # database-backed MLflow tracking store, which the CI runner's
+            # local file store does not provide.
+            mlflow.sklearn.log_model(best_model, "model")
             print("MLflow experiment logged.")
-
-        # Save the best model
-        os.makedirs(model_output_dir, exist_ok=True)
-        model_path = os.path.join(model_output_dir, "best_model.joblib")
-        joblib.dump(best_model, model_path)
-        print(f"Best model saved to {model_path}")
-
     except Exception as e:
-        print(f"An error occurred during model training: {e}")
+        print(f"Warning: MLflow logging failed and was skipped ({e}). "
+              "This does not affect the saved model file.")
 
 if __name__ == "__main__":
     train_model()
