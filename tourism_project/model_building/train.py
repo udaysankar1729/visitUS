@@ -18,7 +18,7 @@ def train_model(
     model_output_dir="tourism_project/deployment"
 ):
     print("Starting model training process...")
-    
+
     # Check if input files exist
     for path in [X_train_path, X_test_path, y_train_path, y_test_path]:
         if not os.path.exists(path):
@@ -36,7 +36,7 @@ def train_model(
         # Identify categorical and numerical columns
         categorical_features = X_train.select_dtypes(include=['object']).columns
         numerical_features = X_train.select_dtypes(include=['int64', 'float64']).columns
-        
+
         # Create preprocessing pipelines for numerical and categorical features
         numerical_transformer = StandardScaler()
         categorical_transformer = OneHotEncoder(handle_unknown='ignore')
